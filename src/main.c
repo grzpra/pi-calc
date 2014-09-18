@@ -30,7 +30,7 @@ int main(int argc, char *argv[])
 	double sec;
 	struct timespec start, end;
 
-	printf("pi-calc version %s started.\n", VERSION)
+	printf("pi-calc version %s started.\n", VERSION);
 
 	res = clock_gettime(CLOCK_MONOTONIC, &start);
 	if (res < 0) {
