@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <getopt.h>
 #include <gmp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,6 +7,8 @@
 #include <time.h>
 
 #include "pi-calc.h"
+
+#define DEFAULT_DIGITS 1000
 
 /* Digits per iteration (where is it from?) */
 #define DPI 14.1816474627254776555
@@ -19,15 +22,20 @@
 #define LTFCON1	10005
 #define LTFCON2	426880
 
-#define print_err(str, val) printf("%s (%d): %s.\n", str, val, strerror(-val))
+#define print_err(str, val) fprintf(stderr, "%s (%d): %s.\n", str, val, strerror(-val))
+
+void print_usage(void)
+{
+	printf("Supported options:\n");
+	printf(" -h --help	prints this message and exits\n");
+	printf(" -d --digits	number of digits for Pi calculations\n");
+}
 
 int chudnovsky(int digits)
 {
 	unsigned long int k, threek, iter, precision;
 	mpf_t rtf, rbf, ltf, r, sum, result;
 	mpz_t a, b, c, d, e, rt, rb;
-
-	printf("Initialization started.\n");
 
 	/* Calculate and set precision */
 	precision = (digits * BPD) + 1;
@@ -45,9 +53,10 @@ int chudnovsky(int digits)
 	mpf_sqrt_ui(ltf, LTFCON1);
 	mpf_mul_ui(ltf, ltf, LTFCON2);
 
-	printf("Main loop starting, will run for %lu iterations.\n", iter);
+	printf("Main loop starting....\n");
+	printf("%d digits | %lu iterations \n", digits, iter);
 
-	/* Main loop, can me parrelized */
+	/* Main loop, can be parrelized */
 	for (k = 0; k < iter; k++) {
 		/* 3k */
 		threek = k * 3;
@@ -93,12 +102,42 @@ int chudnovsky(int digits)
 
 int main(int argc, char *argv[])
 {
-	int nsec, res;
+	int nsec, res, opt, digits = DEFAULT_DIGITS;
 	double sec;
 	double cpu_time, cpu_start, cpu_end;
 	struct timespec start, end;
 
-	printf("PI-calc version %s started.\n", VERSION);
+	const char* short_opts = "hd:";
+	const struct option long_opts[] = {
+		{ "help",	0, NULL, 'h' },
+		{ "digits",	1, NULL, 'd' },
+	};
+
+	printf("pi-calc version %s\n", VERSION);
+
+	do {
+		opt = getopt_long(argc, argv, short_opts, long_opts, NULL);
+		switch(opt)
+		{
+		case 'h':
+			print_usage();
+			return 0;
+		case 'd':
+			digits = atoi(optarg);
+			if (digits <= 0) {
+				res = -EINVAL;
+				print_err("Wrong digits value", res);
+				return res;
+			}
+			break;
+		case -1:
+			break;
+		default:
+			print_usage();
+			res = -EINVAL;
+			return res;
+		}
+	} while (opt != -1);
 
 	/* Get CPU and normal time */
 	cpu_start = clock();
@@ -110,7 +149,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* Run the Chudnovsky algorithm */
-	res = chudnovsky(100);
+	res = chudnovsky(digits);
 	if (res < 0) {
 		print_err("Error during execution", res);
 		return res;
