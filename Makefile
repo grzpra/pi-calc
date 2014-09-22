@@ -8,7 +8,7 @@ INC_DIR=inc
 INT_DIR=int
 
 CFLAGS=-I $(INC_DIR)
-LDFLAGS=-lgmp
+LDFLAGS=-lgmp -lpthread
 
 OBJECTS=$(patsubst $(SRC_DIR)/%.c,$(INT_DIR)/%.o,$(wildcard $(SRC_DIR)/*.c))
 

@@ -1,6 +1,10 @@
+#define _GNU_SOURCE
+
 #include <errno.h>
 #include <getopt.h>
 #include <gmp.h>
+#include <pthread.h>
+#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,6 +13,7 @@
 #include "pi-calc.h"
 
 #define DEFAULT_DIGITS 1000
+#define MAX_CPU_NUMBER 32
 
 /* Digits per iteration (where is it from?) */
 #define DPI 14.1816474627254776555
@@ -29,35 +34,35 @@ void print_usage(void)
 	printf("Supported options:\n");
 	printf(" -h --help	prints this message and exits\n");
 	printf(" -d --digits	number of digits for Pi calculations\n");
+	printf(" -c --cpus	number of threads to run\n");
+	printf("		(by default # of threads = # of logical cores)\n");
 }
 
-int chudnovsky(int digits)
+int get_cpu_count(void)
 {
-	unsigned long int k, threek, iter, precision;
-	mpf_t rtf, rbf, ltf, r, sum, result;
+	cpu_set_t cs;
+
+	CPU_ZERO(&cs);
+	if (sched_getaffinity(0, sizeof(cs), &cs))
+		return 1;
+
+	return CPU_COUNT(&cs);
+}
+
+void *chudnovsky_chunk(void *arguments)
+{
+	unsigned long int k, threek;
 	mpz_t a, b, c, d, e, rt, rb;
+	mpf_t rtf, rbf, r;
 
-	/* Calculate and set precision */
-	precision = (digits * BPD) + 1;
-	mpf_set_default_prec(precision);
+	struct thread_args *args = (struct thread_args *)arguments;
 
-	/* Calculate number of iterations */
-	iter = digits/DPI;
-
-	/* Init all objects */
-	mpf_inits(rtf, rbf, ltf, r, sum, result, NULL);
 	mpz_inits(a, b, c, d, e, rt, rb, NULL);
-	mpf_set_ui(sum, 0);
-
-	/* Prepare the constant from the left side of the equation */
-	mpf_sqrt_ui(ltf, LTFCON1);
-	mpf_mul_ui(ltf, ltf, LTFCON2);
-
-	printf("Main loop starting....\n");
-	printf("%d digits | %lu iterations \n", digits, iter);
+	mpf_inits(rtf, rbf, r, NULL);
+	mpf_set_ui(args->partialsum, 0);
 
 	/* Main loop, can be parrelized */
-	for (k = 0; k < iter; k++) {
+	for (k = args->start; k < args->end; k++) {
 		/* 3k */
 		threek = k * 3;
 		/* (6k!) */
@@ -86,31 +91,102 @@ int chudnovsky(int digits)
 		mpf_set_z(rbf, rb);
 		/* divide top/bottom */
 		mpf_div(r, rtf, rbf);
-		/* add result to the sum */
-		mpf_add(sum, sum, r);
+		/* add result to the partialsum */
+		mpf_add(args->partialsum, args->partialsum, r);
+	}
+
+	mpz_clears(a, b, c, d, e, rt, rb, NULL);
+	mpf_clears(rtf, rbf, r, NULL);
+}
+
+int chudnovsky(int digits, int cpus)
+{
+	unsigned long int i, iter, precision, rest, per_cpu;
+	mpf_t ltf, sum, result;
+	pthread_t *threads[MAX_CPU_NUMBER];
+	struct thread_args targs[MAX_CPU_NUMBER];
+
+#ifdef DEBUG_PRINT
+	mp_exp_t exp;
+	char *debug_out;
+#endif /* DEBUG_PRINT */
+
+	if (cpus == 0) {
+		cpus = get_cpu_count();
+
+		if (cpus > MAX_CPU_NUMBER) {
+			cpus = MAX_CPU_NUMBER;
+		}
+	}
+
+	/* Calculate and set precision */
+	precision = (digits * BPD) + 1;
+	mpf_set_default_prec(precision);
+
+	/* Calculate number of iterations */
+	iter = digits/DPI;
+
+	/* Init all objects */
+	mpf_inits(ltf, sum, result, NULL);
+	mpf_set_ui(sum, 0);
+
+	/* Prepare the constant from the left side of the equation */
+	mpf_sqrt_ui(ltf, LTFCON1);
+	mpf_mul_ui(ltf, ltf, LTFCON2);
+
+	printf("Main loop starting....\n");
+	printf("%d digits | %lu iterations \n", digits, iter);
+
+	rest = iter % cpus;
+	per_cpu = iter / cpus;
+
+	for (i = 0; i < cpus; i++) {
+		mpf_inits(targs[i].partialsum);
+	}
+
+	for (i = 0; i < cpus; i++) {
+		targs[i].start = per_cpu * i;
+		if (i != 0)
+			targs[i].start++;
+
+		targs[i].end = per_cpu * (i + 1);
+		if ((i + 1) == cpus)
+			targs[i].end += rest;
+
+		pthread_create(&threads[i], NULL, &chudnovsky_chunk, (void *) &targs[i]);
+	}
+
+	for (i = 0; i < cpus; i++) {
+		pthread_join(threads[i], NULL);
+		mpf_add(sum, sum, targs[i].partialsum);
 	}
 
 	/* Invert sum */
 	mpf_ui_div(sum, 1, sum);
 	mpf_mul(result, sum, ltf);
 
-	mpf_clears(rtf, rbf, ltf, r, sum, result, NULL);
-	mpz_clears(a, b, c, d, e, rt, rb, NULL);
+#ifdef DEBUG_PRINT
+	debug_out = mpf_get_str(NULL, &exp, 10, 0, result);
+	printf("%.*s.%s\n", (int)exp, debug_out, debug_out + exp);
+#endif /* DEBUG_PRINT */
+
+	mpf_clears(ltf, sum, result, NULL);
 
 	return 0;
 }
 
 int main(int argc, char *argv[])
 {
-	int nsec, res, opt, digits = DEFAULT_DIGITS;
+	int nsec, res, opt, digits = DEFAULT_DIGITS, cpus = 0;
 	double sec;
 	double cpu_time, cpu_start, cpu_end;
 	struct timespec start, end;
 
-	const char* short_opts = "hd:";
+	const char* short_opts = "hd:c:";
 	const struct option long_opts[] = {
 		{ "help",	0, NULL, 'h' },
 		{ "digits",	1, NULL, 'd' },
+		{ "cpus",	1, NULL, 'c' },
 	};
 
 	printf("pi-calc version %s\n", VERSION);
@@ -127,6 +203,14 @@ int main(int argc, char *argv[])
 			if (digits <= 0) {
 				res = -EINVAL;
 				print_err("Wrong digits value", res);
+				return res;
+			}
+			break;
+		case 'c':
+			cpus = atoi(optarg);
+			if (cpus <= 0 || cpus > MAX_CPU_NUMBER) {
+				res = -EINVAL;
+				print_err("Wrong CPU count", res);
 				return res;
 			}
 			break;
@@ -149,7 +233,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* Run the Chudnovsky algorithm */
-	res = chudnovsky(digits);
+	res = chudnovsky(digits, cpus);
 	if (res < 0) {
 		print_err("Error during execution", res);
 		return res;
