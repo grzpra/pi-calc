@@ -1,7 +1,7 @@
 #ifndef __PI_CALC_H
 #define __PI_CALC_H
 
-#define VERSION		"0.02"
+#define VERSION		"0.03"
 
 struct thread_args {
 	unsigned long int start;

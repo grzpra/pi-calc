@@ -34,6 +34,7 @@ void print_usage(void)
 	printf("Supported options:\n");
 	printf(" -h --help	prints this message and exits\n");
 	printf(" -d --digits	number of digits for Pi calculations\n");
+	printf("		(default is %d)\n", DEFAULT_DIGITS);
 	printf(" -c --cpus	number of threads to run\n");
 	printf("		(by default # of threads = # of logical cores)\n");
 }
@@ -103,7 +104,7 @@ int chudnovsky(int digits, int cpus)
 {
 	unsigned long int i, iter, precision, rest, per_cpu;
 	mpf_t ltf, sum, result;
-	pthread_t *threads[MAX_CPU_NUMBER];
+	pthread_t threads[MAX_CPU_NUMBER];
 	struct thread_args targs[MAX_CPU_NUMBER];
 
 #ifdef DEBUG_PRINT
