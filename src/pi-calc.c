@@ -13,7 +13,6 @@
 #include "pi-calc.h"
 
 #define DEFAULT_DIGITS 1000
-#define MAX_THREAD_NUMBER 32
 
 /* Digits per iteration (where is it from?) */
 #define DPI 14.1816474627254776555
@@ -106,10 +105,11 @@ void *chudnovsky_chunk(void *arguments)
 
 int chudnovsky(int digits, int threads)
 {
+	int res = 0;
 	unsigned long int i, iter, precision, rest, per_cpu;
 	mpf_t ltf, sum, result;
-	pthread_t pthreads[MAX_THREAD_NUMBER];
-	struct thread_args targs[MAX_THREAD_NUMBER];
+	pthread_t *pthreads;
+	struct thread_args *targs;
 
 #ifdef DEBUG_PRINT
 	mp_exp_t exp;
@@ -118,10 +118,18 @@ int chudnovsky(int digits, int threads)
 
 	if (threads == 0) {
 		threads = get_cpu_count();
+	}
 
-		if (threads > MAX_THREAD_NUMBER) {
-			threads = MAX_THREAD_NUMBER;
-		}
+	pthreads = malloc(threads * sizeof(pthread_t));
+	if (pthreads == NULL) {
+		res = -ENOMEM;
+		goto chudnovsky_exit;
+	}
+
+	targs = malloc(threads * sizeof(struct thread_args));
+	if (targs == NULL) {
+		res = -ENOMEM;
+		goto chudnovsky_free_pthreads;
 	}
 
 	/* Calculate and set precision */
@@ -181,12 +189,18 @@ int chudnovsky(int digits, int threads)
 	mpf_clears(ltf, sum, result, NULL);
 
 	/* TODO: add verification here! */
-	return 0;
+
+chudnovsky_free_pthreads:
+	free(pthreads);
+chudnovsky_free_targs:
+	free(targs);
+chudnovsky_exit:
+	return res;
 }
 
 int main(int argc, char *argv[])
 {
-	int nsec, res, opt, digits = DEFAULT_DIGITS, threads = 0;
+	int nsec, res = 0, opt, digits = DEFAULT_DIGITS, threads = 0;
 	double sec;
 	double cpu_time, cpu_start, cpu_end;
 	struct timespec start, end;
@@ -217,7 +231,7 @@ int main(int argc, char *argv[])
 			break;
 		case 't':
 			threads = atoi(optarg);
-			if (threads <= 0 || threads > MAX_THREAD_NUMBER) {
+			if (threads <= 0) {
 				res = -EINVAL;
 				print_err("Wrong threads count", res);
 				return res;
