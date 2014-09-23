@@ -13,7 +13,7 @@
 #include "pi-calc.h"
 
 #define DEFAULT_DIGITS 1000
-#define MAX_CPU_NUMBER 32
+#define MAX_THREAD_NUMBER 32
 
 /* Digits per iteration (where is it from?) */
 #define DPI 14.1816474627254776555
@@ -35,7 +35,7 @@ void print_usage(void)
 	printf(" -h --help	prints this message and exits\n");
 	printf(" -d --digits	number of digits for Pi calculations\n");
 	printf("		(default is %d)\n", DEFAULT_DIGITS);
-	printf(" -c --cpus	number of threads to run\n");
+	printf(" -t --threads	number of threads to run\n");
 	printf("		(by default # of threads = # of logical cores)\n");
 }
 
@@ -100,23 +100,23 @@ void *chudnovsky_chunk(void *arguments)
 	mpf_clears(rtf, rbf, r, NULL);
 }
 
-int chudnovsky(int digits, int cpus)
+int chudnovsky(int digits, int threads)
 {
 	unsigned long int i, iter, precision, rest, per_cpu;
 	mpf_t ltf, sum, result;
-	pthread_t threads[MAX_CPU_NUMBER];
-	struct thread_args targs[MAX_CPU_NUMBER];
+	pthread_t pthreads[MAX_THREAD_NUMBER];
+	struct thread_args targs[MAX_THREAD_NUMBER];
 
 #ifdef DEBUG_PRINT
 	mp_exp_t exp;
 	char *debug_out;
 #endif /* DEBUG_PRINT */
 
-	if (cpus == 0) {
-		cpus = get_cpu_count();
+	if (threads == 0) {
+		threads = get_cpu_count();
 
-		if (cpus > MAX_CPU_NUMBER) {
-			cpus = MAX_CPU_NUMBER;
+		if (threads > MAX_THREAD_NUMBER) {
+			threads = MAX_THREAD_NUMBER;
 		}
 	}
 
@@ -135,30 +135,31 @@ int chudnovsky(int digits, int cpus)
 	mpf_sqrt_ui(ltf, LTFCON1);
 	mpf_mul_ui(ltf, ltf, LTFCON2);
 
-	printf("Main loop starting....\n");
-	printf("%d digits | %lu iterations \n", digits, iter);
+	printf("Main loop starting, using:\n"
+		"%d digits - %lu iterations - %d threads\n",
+		digits, iter, threads);
 
-	rest = iter % cpus;
-	per_cpu = iter / cpus;
+	rest = iter % threads;
+	per_cpu = iter / threads;
 
-	for (i = 0; i < cpus; i++) {
+	for (i = 0; i < threads; i++) {
 		mpf_inits(targs[i].partialsum);
 	}
 
-	for (i = 0; i < cpus; i++) {
+	for (i = 0; i < threads; i++) {
 		targs[i].start = per_cpu * i;
 		if (i != 0)
 			targs[i].start++;
 
 		targs[i].end = per_cpu * (i + 1);
-		if ((i + 1) == cpus)
+		if ((i + 1) == threads)
 			targs[i].end += rest;
 
-		pthread_create(&threads[i], NULL, &chudnovsky_chunk, (void *) &targs[i]);
+		pthread_create(&pthreads[i], NULL, &chudnovsky_chunk, (void *) &targs[i]);
 	}
 
-	for (i = 0; i < cpus; i++) {
-		pthread_join(threads[i], NULL);
+	for (i = 0; i < threads; i++) {
+		pthread_join(pthreads[i], NULL);
 		mpf_add(sum, sum, targs[i].partialsum);
 	}
 
@@ -178,16 +179,16 @@ int chudnovsky(int digits, int cpus)
 
 int main(int argc, char *argv[])
 {
-	int nsec, res, opt, digits = DEFAULT_DIGITS, cpus = 0;
+	int nsec, res, opt, digits = DEFAULT_DIGITS, threads = 0;
 	double sec;
 	double cpu_time, cpu_start, cpu_end;
 	struct timespec start, end;
 
-	const char* short_opts = "hd:c:";
+	const char* short_opts = "hd:t:";
 	const struct option long_opts[] = {
 		{ "help",	0, NULL, 'h' },
 		{ "digits",	1, NULL, 'd' },
-		{ "cpus",	1, NULL, 'c' },
+		{ "threads",	1, NULL, 't' },
 	};
 
 	printf("pi-calc version %s\n", VERSION);
@@ -207,11 +208,11 @@ int main(int argc, char *argv[])
 				return res;
 			}
 			break;
-		case 'c':
-			cpus = atoi(optarg);
-			if (cpus <= 0 || cpus > MAX_CPU_NUMBER) {
+		case 't':
+			threads = atoi(optarg);
+			if (threads <= 0 || threads > MAX_THREAD_NUMBER) {
 				res = -EINVAL;
-				print_err("Wrong CPU count", res);
+				print_err("Wrong threads count", res);
 				return res;
 			}
 			break;
@@ -234,7 +235,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* Run the Chudnovsky algorithm */
-	res = chudnovsky(digits, cpus);
+	res = chudnovsky(digits, threads);
 	if (res < 0) {
 		print_err("Error during execution", res);
 		return res;
