@@ -39,6 +39,8 @@ void print_usage(void)
 	printf("		(by default # of threads = # of logical cores)\n");
 }
 
+/* Gets the number of available CPUs based on available affinities */
+/* TODO: OS specific? Might be better to use different method */
 int get_cpu_count(void)
 {
 	cpu_set_t cs;
@@ -58,6 +60,7 @@ void *chudnovsky_chunk(void *arguments)
 
 	struct thread_args *args = (struct thread_args *)arguments;
 
+	/* Init libgmp variables */
 	mpz_inits(a, b, c, d, e, rt, rb, NULL);
 	mpf_inits(rtf, rbf, r, NULL);
 	mpf_set_ui(args->partialsum, 0);
@@ -96,6 +99,7 @@ void *chudnovsky_chunk(void *arguments)
 		mpf_add(args->partialsum, args->partialsum, r);
 	}
 
+	/* Deinit variables, result is passed via args->partialsum */
 	mpz_clears(a, b, c, d, e, rt, rb, NULL);
 	mpf_clears(rtf, rbf, r, NULL);
 }
@@ -139,6 +143,7 @@ int chudnovsky(int digits, int threads)
 		"%d digits - %lu iterations - %d threads\n",
 		digits, iter, threads);
 
+	/* Calculates number of iterations per thread and initializes targs */
 	rest = iter % threads;
 	per_cpu = iter / threads;
 
@@ -158,6 +163,7 @@ int chudnovsky(int digits, int threads)
 		pthread_create(&pthreads[i], NULL, &chudnovsky_chunk, (void *) &targs[i]);
 	}
 
+	/* Wait for threads to finish and take their sums */
 	for (i = 0; i < threads; i++) {
 		pthread_join(pthreads[i], NULL);
 		mpf_add(sum, sum, targs[i].partialsum);
@@ -174,6 +180,7 @@ int chudnovsky(int digits, int threads)
 
 	mpf_clears(ltf, sum, result, NULL);
 
+	/* TODO: add verification here! */
 	return 0;
 }
 
