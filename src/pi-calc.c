@@ -22,7 +22,7 @@
 #define BCONST1 545140134
 #define BCONST2 13591409
 #define DCONST1 3
-#define ECONST1 -640320
+#define ECONST1 640320
 #define LTFCON1	10005
 #define LTFCON2	426880
 
@@ -59,6 +59,9 @@ void *chudnovsky_chunk(void *arguments)
 
 	struct thread_args *args = (struct thread_args *)arguments;
 
+	mp_exp_t exp;
+	char *debug_out;
+
 	/* Init libgmp variables */
 	mpz_inits(a, b, c, d, e, rt, rb, NULL);
 	mpf_inits(rtf, rbf, r, NULL);
@@ -69,7 +72,7 @@ void *chudnovsky_chunk(void *arguments)
 		/* 3k */
 		threek = k * 3;
 		/* (6k!) */
-		mpz_fac_ui(a, threek << 2);
+		mpz_fac_ui(a, threek << 1);
 		/* 545140134k */
 		mpz_set_ui(b, BCONST1);
 		mpz_mul_ui(b, b, k);
@@ -83,6 +86,7 @@ void *chudnovsky_chunk(void *arguments)
 		/* (-640320)^3k */
 		mpz_set_ui(e, ECONST1);
 		mpz_pow_ui(e, e, threek);
+		if ((threek & 1) == 1) mpz_neg(e, e);
 		/* Get everything together */
 		/* (6k)! (13591409 + 545140134k) */
 		mpz_mul(rt, a, b);
@@ -131,13 +135,14 @@ int chudnovsky(int digits, int threads)
 		res = -ENOMEM;
 		goto chudnovsky_free_pthreads;
 	}
+	memset(targs, 0, threads * sizeof(struct thread_args));
 
 	/* Calculate and set precision */
 	precision = (digits * BPD) + 1;
 	mpf_set_default_prec(precision);
 
 	/* Calculate number of iterations */
-	iter = digits/DPI;
+	iter = digits/DPI + 1;
 
 	/* Init all objects */
 	mpf_inits(ltf, sum, result, NULL);
@@ -156,17 +161,17 @@ int chudnovsky(int digits, int threads)
 	per_cpu = iter / threads;
 
 	for (i = 0; i < threads; i++) {
-		mpf_inits(targs[i].partialsum);
+		mpf_inits(targs[i].partialsum, NULL);
 	}
 
 	for (i = 0; i < threads; i++) {
-		targs[i].start = per_cpu * i;
-		if (i != 0)
-			targs[i].start++;
+		targs[i].start = (i == 0)? 0 : targs[i-1].end;
+		targs[i].end = targs[i].start + per_cpu;
 
-		targs[i].end = per_cpu * (i + 1);
-		if ((i + 1) == threads)
-			targs[i].end += rest;
+		if (rest) {
+			targs[i].end++;
+			rest--;
+		}
 
 		pthread_create(&pthreads[i], NULL, &chudnovsky_chunk, (void *) &targs[i]);
 	}
@@ -182,8 +187,9 @@ int chudnovsky(int digits, int threads)
 	mpf_mul(result, sum, ltf);
 
 #ifdef DEBUG_PRINT
-	debug_out = mpf_get_str(NULL, &exp, 10, 0, result);
+	debug_out = mpf_get_str(NULL, &exp, 10, digits, result);
 	printf("%.*s.%s\n", (int)exp, debug_out, debug_out + exp);
+	free(debug_out);
 #endif /* DEBUG_PRINT */
 
 	mpf_clears(ltf, sum, result, NULL);
