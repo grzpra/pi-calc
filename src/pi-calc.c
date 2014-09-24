@@ -13,6 +13,7 @@
 #include "pi-calc.h"
 
 #define DEFAULT_DIGITS 1000
+#define LAST_DIGITS_PRINT 50
 
 /* Digits per iteration (where is it from?) */
 #define DPI 14.1816474627254776555
@@ -56,11 +57,7 @@ void *chudnovsky_chunk(void *arguments)
 	unsigned long int k, threek;
 	mpz_t a, b, c, d, e, rt, rb;
 	mpf_t rtf, rbf, r;
-
 	struct thread_args *args = (struct thread_args *)arguments;
-
-	mp_exp_t exp;
-	char *debug_out;
 
 	/* Init libgmp variables */
 	mpz_inits(a, b, c, d, e, rt, rb, NULL);
@@ -114,11 +111,8 @@ int chudnovsky(int digits, int threads)
 	mpf_t ltf, sum, result;
 	pthread_t *pthreads;
 	struct thread_args *targs;
-
-#ifdef DEBUG_PRINT
-	mp_exp_t exp;
-	char *debug_out;
-#endif /* DEBUG_PRINT */
+        mp_exp_t exponent;
+        char *pi;
 
 	if (threads == 0) {
 		threads = get_cpu_count();
@@ -152,7 +146,7 @@ int chudnovsky(int digits, int threads)
 	mpf_sqrt_ui(ltf, LTFCON1);
 	mpf_mul_ui(ltf, ltf, LTFCON2);
 
-	printf("Main loop starting, using:\n"
+	printf("Starting summing, using:\n"
 		"%d digits - %lu iterations - %d threads\n",
 		digits, iter, threads);
 
@@ -162,9 +156,6 @@ int chudnovsky(int digits, int threads)
 
 	for (i = 0; i < threads; i++) {
 		mpf_inits(targs[i].partialsum, NULL);
-	}
-
-	for (i = 0; i < threads; i++) {
 		targs[i].start = (i == 0)? 0 : targs[i-1].end;
 		targs[i].end = targs[i].start + per_cpu;
 
@@ -182,15 +173,23 @@ int chudnovsky(int digits, int threads)
 		mpf_add(sum, sum, targs[i].partialsum);
 	}
 
+	printf("Starting final steps");
+
 	/* Invert sum */
 	mpf_ui_div(sum, 1, sum);
 	mpf_mul(result, sum, ltf);
 
-#ifdef DEBUG_PRINT
-	debug_out = mpf_get_str(NULL, &exp, 10, digits, result);
-	printf("%.*s.%s\n", (int)exp, debug_out, debug_out + exp);
-	free(debug_out);
-#endif /* DEBUG_PRINT */
+	pi = mpf_get_str(NULL, &exponent, 10, digits + 1, result);
+
+	if (strlen(pi) < LAST_DIGITS_PRINT + 1) {
+		printf("Calculated PI:\n");
+		printf("\t%.*s.%s\n", (int)exponent, pi, pi + exponent);
+	} else {
+		printf("Last digits of Pi are:\n");
+		printf("\t%s\n", pi+(digits-(LAST_DIGITS_PRINT-1)));
+	}
+
+	free(pi);
 
 	mpf_clears(ltf, sum, result, NULL);
 
