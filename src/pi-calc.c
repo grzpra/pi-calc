@@ -173,7 +173,7 @@ int chudnovsky(int digits, int threads)
 		mpf_add(sum, sum, targs[i].partialsum);
 	}
 
-	printf("Starting final steps");
+	printf("Starting final steps\n");
 
 	/* Invert sum */
 	mpf_ui_div(sum, 1, sum);
