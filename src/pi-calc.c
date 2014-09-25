@@ -54,18 +54,26 @@ int get_cpu_count(void)
 
 void *chudnovsky_chunk(void *arguments)
 {
-	unsigned long int k, threek;
+	unsigned long int k, threek, total_iterations;
 	mpz_t a, b, c, d, e, rt, rb;
 	mpf_t rtf, rbf, r;
 	struct thread_args *args = (struct thread_args *)arguments;
 
+	total_iterations = args->iter;
+
 	/* Init libgmp variables */
 	mpz_inits(a, b, c, d, e, rt, rb, NULL);
 	mpf_inits(rtf, rbf, r, NULL);
-	mpf_set_ui(args->partialsum, 0);
 
-	/* Main loop, can be parrelized */
-	for (k = args->start; k < args->end; k++) {
+	/* Main loop of a thread */
+	while (1) {
+		/* Check which k needs calculation */
+		pthread_mutex_lock(&args->start_mutex);
+		k = args->k;
+		args->k++;
+		pthread_mutex_unlock(&args->start_mutex);
+		/* If all ks are done, say return */
+		if (k > total_iterations) break;
 		/* 3k */
 		threek = k * 3;
 		/* (6k!) */
@@ -95,11 +103,14 @@ void *chudnovsky_chunk(void *arguments)
 		mpf_set_z(rbf, rb);
 		/* divide top/bottom */
 		mpf_div(r, rtf, rbf);
-		/* add result to the partialsum */
-		mpf_add(args->partialsum, args->partialsum, r);
+		/* add result to the sum */
+
+		pthread_mutex_lock(&args->sum_mutex);
+		mpf_add(args->sum, args->sum, r);
+		pthread_mutex_unlock(&args->sum_mutex);
 	}
 
-	/* Deinit variables, result is passed via args->partialsum */
+	/* Deinit variables, result is passed via args->sum */
 	mpz_clears(a, b, c, d, e, rt, rb, NULL);
 	mpf_clears(rtf, rbf, r, NULL);
 }
@@ -107,13 +118,14 @@ void *chudnovsky_chunk(void *arguments)
 int chudnovsky(int digits, int threads)
 {
 	int res = 0;
-	unsigned long int i, iter, precision, rest, per_cpu;
+	unsigned long int i, iter, precision, rest, per_cpu, k;
 	mpf_t ltf, sum, result;
 	pthread_t *pthreads;
-	struct thread_args *targs;
+	struct thread_args targs;
         mp_exp_t exponent;
         char *pi;
 
+	/* If threads is not specified, check how many CPUs are avail */
 	if (threads == 0) {
 		threads = get_cpu_count();
 	}
@@ -124,13 +136,6 @@ int chudnovsky(int digits, int threads)
 		goto chudnovsky_exit;
 	}
 
-	targs = malloc(threads * sizeof(struct thread_args));
-	if (targs == NULL) {
-		res = -ENOMEM;
-		goto chudnovsky_free_pthreads;
-	}
-	memset(targs, 0, threads * sizeof(struct thread_args));
-
 	/* Calculate and set precision */
 	precision = (digits * BPD) + 1;
 	mpf_set_default_prec(precision);
@@ -139,8 +144,15 @@ int chudnovsky(int digits, int threads)
 	iter = digits/DPI + 1;
 
 	/* Init all objects */
-	mpf_inits(ltf, sum, result, NULL);
+	mpf_inits(ltf, sum, result, targs.sum, NULL);
 	mpf_set_ui(sum, 0);
+	mpf_set_ui(targs.sum, 0);
+
+	/* Set pthread specific stuff */
+	targs.k = 0;
+	targs.iter = iter;
+	pthread_mutex_init(&targs.start_mutex, NULL);
+	pthread_mutex_init(&targs.sum_mutex, NULL);
 
 	/* Prepare the constant from the left side of the equation */
 	mpf_sqrt_ui(ltf, LTFCON1);
@@ -150,33 +162,19 @@ int chudnovsky(int digits, int threads)
 		"%d digits - %lu iterations - %d threads\n",
 		digits, iter, threads);
 
-	/* Calculates number of iterations per thread and initializes targs */
-	rest = iter % threads;
-	per_cpu = iter / threads;
-
 	for (i = 0; i < threads; i++) {
-		mpf_inits(targs[i].partialsum, NULL);
-		targs[i].start = (i == 0)? 0 : targs[i-1].end;
-		targs[i].end = targs[i].start + per_cpu;
-
-		if (rest) {
-			targs[i].end++;
-			rest--;
-		}
-
-		pthread_create(&pthreads[i], NULL, &chudnovsky_chunk, (void *) &targs[i]);
+		pthread_create(&pthreads[i], NULL, &chudnovsky_chunk, (void *) &targs);
 	}
 
 	/* Wait for threads to finish and take their sums */
 	for (i = 0; i < threads; i++) {
 		pthread_join(pthreads[i], NULL);
-		mpf_add(sum, sum, targs[i].partialsum);
 	}
 
 	printf("Starting final steps\n");
 
 	/* Invert sum */
-	mpf_ui_div(sum, 1, sum);
+	mpf_ui_div(sum, 1, targs.sum);
 	mpf_mul(result, sum, ltf);
 
 	pi = mpf_get_str(NULL, &exponent, 10, digits + 1, result);
@@ -192,13 +190,13 @@ int chudnovsky(int digits, int threads)
 	free(pi);
 
 	mpf_clears(ltf, sum, result, NULL);
+	pthread_mutex_destroy(&targs.start_mutex);
+	pthread_mutex_destroy(&targs.sum_mutex);
 
 	/* TODO: add verification here! */
 
 chudnovsky_free_pthreads:
 	free(pthreads);
-chudnovsky_free_targs:
-	free(targs);
 chudnovsky_exit:
 	return res;
 }
