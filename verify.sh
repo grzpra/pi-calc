@@ -12,8 +12,7 @@ fi
 
 rm -rf $OUTFILE
 
-for i in 10000
-# 12000 15000 20000 25000 40000 50000 75000 100000 120000 150000
+for i in 10000 12000 15000 20000 25000 40000 50000 75000 100000 120000 150000
 do
 	OUTPUT=$($PROG -d $i)
 	printf "%6d %s\n" $i $(echo "$OUTPUT" | grep -P '\t' | tr -d '\t') >> $OUTFILE
