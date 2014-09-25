@@ -1,4 +1,4 @@
 pi-calc
 =============
 
-Hopefully this will turn out to be a nice CPU benchmark.
+PI calculation program based on Chudnovsky algorithm, using pthreads and libgmp.
