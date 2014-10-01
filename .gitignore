@@ -28,3 +28,6 @@
 *.x86_64
 *.hex
 pi-calc
+
+# Verification output
+verify_out.txt
