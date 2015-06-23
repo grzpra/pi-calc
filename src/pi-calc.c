@@ -18,7 +18,7 @@
 /* Digits per iteration (where is it from?) */
 #define DPI 14.1816474627254776555
 /* Bits per digit (log2(10)) */
-#define BPD 3.32192809488736234789
+#define BPD 3.32192809488736234787
 
 #define BCONST1 545140134
 #define BCONST2 13591409
