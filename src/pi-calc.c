@@ -177,7 +177,9 @@ int chudnovsky(int digits, int threads)
 	mpf_ui_div(sum, 1, targs.sum);
 	mpf_mul(result, sum, ltf);
 
-	pi = mpf_get_str(NULL, &exponent, 10, digits + 1, result);
+	/* Get one more char then needed and then trunc to avoid rounding */
+	pi = mpf_get_str(NULL, &exponent, 10, digits + 2, result);
+	pi[digits+1] = '\0';
 
 	if (strlen(pi) < LAST_DIGITS_PRINT + 1) {
 		printf("Calculated PI:\n");
